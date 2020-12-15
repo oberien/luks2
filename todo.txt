@@ -1,0 +1,2 @@
+things to check when parsing a json area:
+- config json size must match header (check after parsing?)

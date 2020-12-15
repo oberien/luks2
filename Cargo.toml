@@ -1,0 +1,21 @@
+[package]
+name = "luks2"
+version = "0.1.0"
+authors = ["Max von Forell <max@vonforell.de>"]
+edition = "2018"
+
+[lib]
+name = "luks2"
+path = "./src/lib.rs"
+
+[dependencies]
+bincode = "1.3"
+serde = { version = "1.0", features = ["derive"] }
+serde-big-array = "0.3"
+serde_json = "1.0"
+
+[dev-dependencies]
+gptman = { version = "0.7", default_features = false }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-drives = { git = "https://git.sr.ht/~mvforell/windows-drives" } # "0.2"
