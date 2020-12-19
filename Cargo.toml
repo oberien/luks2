@@ -19,3 +19,7 @@ gptman = { version = "0.7", default_features = false }
 
 [target.'cfg(windows)'.dev-dependencies]
 windows-drives = { git = "https://git.sr.ht/~mvforell/windows-drives" } # "0.2"
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"
+nix = "0.19"
