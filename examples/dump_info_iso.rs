@@ -18,7 +18,7 @@ fn main() {
 		.expect("could not parse header");
 	println!("{}", header);
 
-	let mut j = vec![0; 3*4096];
+	let mut j = vec![0; (header.hdr_size - 4096) as usize];
 	f.read_exact(&mut j).expect("could not read from luks.iso");
 	let j: Vec<u8> = j.iter().map(|b| *b).filter(|b| *b != 0).collect();
 	let json = LuksJson::read_from(&mut Cursor::new(&j))
