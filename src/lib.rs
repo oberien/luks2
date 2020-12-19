@@ -394,23 +394,25 @@ impl LuksJson {
 			Err(e) => return Err(format!("{}", e))
 		};
 		// check that the stripes value of all afs are 4000
-		if !j.keyslots.iter().all(|(_, k)| {
+		let stripes_ok = j.keyslots.iter().all(|(_, k)| {
 			match k {
 				LuksKeyslot::luks2 { af, .. } => match af {
 					LuksAf::luks1{ stripes, .. } => *stripes == 4000u16
 				}
 			}
-		}) {
+		});
+		if !stripes_ok {
 			return Err("stripe value of LuksAf must be 4000".to_string());
 		}
 		// check that sector sizes of all segments are valid
-		if !j.segments.iter().all(|(_, s)| {
+		let sector_sizes_valid = j.segments.iter().all(|(_, s)| {
 			match s {
 				LuksSegment::crypt { sector_size, .. } => {
 					vec![512, 1024, 2048, 4096].contains(sector_size)
 				}
 			}
-		}) {
+		});
+		if !sector_sizes_valid {
 			return Err("sector size must be 512, 1024, 2048 or 4096".to_string());
 		}
 		// check that keyslots size is aligned to 4096
@@ -418,14 +420,15 @@ impl LuksJson {
 			return Err("config keyslots size must be aligned to 4096 bytes".to_string());
 		}
 		// check that all segments/keyslots references are valid
-		if !j.digests.iter().all(|(_, d)| {
+		let refs_valid = j.digests.iter().all(|(_, d)| {
 			match d {
 				LuksDigest::pbkdf2 { keyslots, segments, .. } => {
 					keyslots.iter().all(|k| j.keyslots.contains_key(k)) &&
 					segments.iter().all(|s| j.keyslots.contains_key(s))
 				}
 			}
-		}) {
+		});
+		if !refs_valid {
 			return Err("invalid keyslots/segment reference".to_string());
 		}
 
