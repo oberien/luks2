@@ -386,7 +386,8 @@ pub struct LuksJson {
 }
 
 impl LuksJson {
-	/// Attempt to read a LUKS2 JSON area from a reader.
+	/// Attempt to read a LUKS2 JSON area from a reader. The reader must contain exactly the JSON data
+	/// and nothing more.
 	pub fn read_from<R: Read>(mut reader: &mut R) -> Result<Self, String> {
 		let j: Self = match serde_json::from_reader(&mut reader) {
 			Ok(j) => j,
