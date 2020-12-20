@@ -156,7 +156,7 @@ pub enum LuksArea {
 		/// The area encryption algorithm, in dm-crypt notation (e. g. "aes-xts-plain64").
 		encryption: String,
 		/// The area encryption key size.
-		key_size: u16,
+		key_size: u32,
 		/// The offset from the device start to the beginning of the binary area in bytes.
         #[serde(deserialize_with = "from_str")]
 		offset: u64,
@@ -175,7 +175,7 @@ impl LuksArea {
 	}
 
 	/// Returns the key size of the area.
-	pub fn key_size(&self) -> u16 {
+	pub fn key_size(&self) -> u32 {
 		match self {
 			LuksArea::raw { key_size, .. } => *key_size
 		}
