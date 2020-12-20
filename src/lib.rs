@@ -166,6 +166,36 @@ pub enum LuksArea {
     }
 }
 
+impl LuksArea {
+	/// Returns the encryption algorithm of the area.
+	pub fn encryption(&self) -> &String {
+		match self {
+			LuksArea::raw { encryption, .. } => encryption
+		}
+	}
+
+	/// Returns the key size of the area.
+	pub fn key_size(&self) -> u16 {
+		match self {
+			LuksArea::raw { key_size, .. } => *key_size
+		}
+	}
+
+	/// Returns the offset of the area.
+	pub fn offset(&self) -> u64 {
+		match self {
+			LuksArea::raw { offset, .. } => *offset
+		}
+	}
+
+	/// Returns the size of the area.
+	pub fn size(&self) -> u64 {
+		match self {
+			LuksArea::raw { size, .. } => *size
+		}
+	}
+}
+
 /// An anti-forensic splitter of a [`LuksKeyslot`]. See
 /// [the LUKS1 spec](https://gitlab.com/cryptsetup/cryptsetup/wikis/Specification)
 /// for more information.
@@ -184,6 +214,22 @@ pub enum LuksAf {
     }
 }
 
+impl LuksAf {
+	/// Returns the number of stripes of the anti-forensic splitter.
+	pub fn stripes(&self) -> u16 {
+		match self {
+			LuksAf::luks1 { stripes, .. } => *stripes
+		}
+	}
+
+	/// Returns hash algorithm used for the anti-forensic splitter.
+	pub fn hash(&self) -> &String {
+		match self {
+			LuksAf::luks1 { hash, .. } => hash
+		}
+	}
+}
+
 /// Stores information on the PBKDF type and parameters of a [`LuksKeyslot`].
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type")]
@@ -191,15 +237,15 @@ pub enum LuksAf {
 #[allow(non_camel_case_types)]
 pub enum LuksKdf {
     pbkdf2 {
-		/// The salt for PBKDF in base64 (binary data).
+		/// The salt for the PBKDF in base64 (binary data).
 		salt: String,
-		/// The hash algorithm for the PKBDF2.
+		/// The hash algorithm for the PKBDF.
 		hash: String,
 		/// The PBKDF2 iterations count.
         iterations: u32
     },
     argon2i {
-		/// The salt for PBKDF in base64 (binary data).
+		/// The salt for the PBKDF in base64 (binary data).
 		salt: String,
 		/// The time cost (in fact the iterations).
 		time: u32,
@@ -210,7 +256,7 @@ pub enum LuksKdf {
         cpus: u32
     },
     argon2id {
-		/// The salt for PBKDF in base64 (binary data).
+		/// The salt for the PBKDF in base64 (binary data).
 		salt: String,
 		/// The time cost (in fact the iterations).
 		time: u32,
@@ -220,6 +266,17 @@ pub enum LuksKdf {
 		/// will be slower.
         cpus: u32
     }
+}
+
+impl LuksKdf {
+	/// Returns the salt for the PBKDF in base64 (binary data).
+	pub fn salt(&self) -> &String {
+		match self {
+			LuksKdf::pbkdf2 { salt, .. } => salt,
+			LuksKdf::argon2i { salt, .. } => salt,
+			LuksKdf::argon2id { salt, .. } => salt
+		}
+	}
 }
 
 /// The priority of a [`LuksKeyslot`].
@@ -259,6 +316,43 @@ pub enum LuksKeyslot {
         #[serde(default)]
         priority: Option<LuksPriority>
     }
+}
+
+impl LuksKeyslot {
+	/// Returns the key size of the key stored in the slot, in bytes.
+	pub fn key_size(&self) -> u16 {
+		match self {
+			LuksKeyslot::luks2 { key_size, .. } => *key_size
+		}
+	}
+
+	/// Returns the area of the keyslot.
+	pub fn area(&self) -> &LuksArea {
+		match self {
+			LuksKeyslot::luks2 { area, .. } => area
+		}
+	}
+
+	/// Returns the key derivation function of the keyslot.
+	pub fn kdf(&self) -> &LuksKdf {
+		match self {
+			LuksKeyslot::luks2 { kdf, .. } => kdf
+		}
+	}
+
+	/// Returns the anti-forensic splitter of the keyslot.
+	pub fn af(&self) -> &LuksAf {
+		match self {
+			LuksKeyslot::luks2 { af, .. } => af
+		}
+	}
+
+	/// Returns the priority of the keyslot.
+	pub fn priority(&self) -> Option<&LuksPriority> {
+		match self {
+			LuksKeyslot::luks2 { priority, .. } => priority.as_ref()
+		}
+	}
 }
 
 /// The LUKS2 user data integrity protection type, an experimental feature which is only included
@@ -316,6 +410,57 @@ pub enum LuksSegment {
     }
 }
 
+impl LuksSegment {
+	/// Returns the offset of the segment.
+	pub fn offset(&self) -> u64 {
+		match self {
+			LuksSegment::crypt { offset, .. } => *offset
+		}
+	}
+
+	/// Returns the size of the segment.
+	pub fn size(&self) -> &LuksSegmentSize {
+		match self {
+			LuksSegment::crypt { size, .. } => size
+		}
+	}
+
+	/// Returns the starting offset for the Initialization Vector.
+	pub fn iv_tweak(&self) -> u64 {
+		match self {
+			LuksSegment::crypt { iv_tweak, .. } => *iv_tweak
+		}
+	}
+
+	/// Returns the segment encryption algorithm.
+	pub fn encryption(&self) -> &String {
+		match self {
+			LuksSegment::crypt { encryption, .. } => encryption
+		}
+	}
+
+	/// Returns the sector size of the segment.
+	pub fn sector_size(&self) -> u16 {
+		match self {
+			LuksSegment::crypt { sector_size, .. } => *sector_size
+		}
+	}
+
+	/// Returns the integrity object of the segment.
+	pub fn integrity(&self) -> Option<&LuksIntegrity> {
+		match self {
+			LuksSegment::crypt { integrity, .. } => integrity.as_ref()
+		}
+	}
+
+	/// Returns the flags of the segment.
+	pub fn flags(&self) -> Option<&Vec<String>> {
+		match self {
+			LuksSegment::crypt { flags, .. } => flags.as_ref()
+		}
+	}
+}
+
 /// A digest is used to verify that a key decrypted from a keyslot is correct. Digests are assigned
 /// to keyslots and segments. If it is not assigned to a segment, then it is a digest for an unbound
 /// key. Every keyslot must have one assigned digest. The key digest also specifies the exact key size
@@ -338,11 +483,55 @@ pub enum LuksDigest {
 		salt: String,
 		/// The binary digest data, in base64.
 		digest: String,
-		/// The hash algorithm for PBKDF2.
+		/// The hash algorithm used by PBKDF2.
 		hash: String,
 		/// The PBKDF2 iterations count.
         iterations: u32
     }
+}
+
+impl LuksDigest {
+	/// Returns the keyslots assigned to the digest.
+	pub fn keyslots(&self) -> &Vec<u8> {
+		match self {
+			LuksDigest::pbkdf2 { keyslots, .. } => keyslots
+		}
+	}
+
+	/// Returns the segments assigned to the digest.
+	pub fn segments(&self) -> &Vec<u8> {
+		match self {
+			LuksDigest::pbkdf2 { segments, .. } => segments
+		}
+	}
+
+	/// Returns the salt of the digest.
+	pub fn salt(&self) -> &String {
+		match self {
+			LuksDigest::pbkdf2 { salt, .. } => salt
+		}
+	}
+
+	/// Returns the digest of the digest object.
+	pub fn digest(&self) -> &String {
+		match self {
+			LuksDigest::pbkdf2 { digest, .. } => digest
+		}
+	}
+
+	/// Returns the hash algorithm used by PBKDF2.
+	pub fn hash(&self) -> &String {
+		match self {
+			LuksDigest::pbkdf2 { hash, .. } => hash
+		}
+	}
+
+	/// Returns the PBKDF2 iterations count.
+	pub fn iterations(&self) -> u32 {
+		match self {
+			LuksDigest::pbkdf2 { iterations, .. } => *iterations
+		}
+	}
 }
 
 /// Global attributes for the LUKS device.
@@ -393,40 +582,32 @@ impl LuksJson {
 			Ok(j) => j,
 			Err(e) => return Err(format!("{}", e))
 		};
+
 		// check that the stripes value of all afs are 4000
 		let stripes_ok = j.keyslots.iter().all(|(_, k)| {
-			match k {
-				LuksKeyslot::luks2 { af, .. } => match af {
-					LuksAf::luks1{ stripes, .. } => *stripes == 4000u16
-				}
-			}
+			k.af().stripes() == 4000u16
 		});
 		if !stripes_ok {
 			return Err("stripe value of LuksAf must be 4000".to_string());
 		}
+
 		// check that sector sizes of all segments are valid
 		let sector_sizes_valid = j.segments.iter().all(|(_, s)| {
-			match s {
-				LuksSegment::crypt { sector_size, .. } => {
-					vec![512, 1024, 2048, 4096].contains(sector_size)
-				}
-			}
+			vec![512, 1024, 2048, 4096].contains(&s.sector_size())
 		});
 		if !sector_sizes_valid {
 			return Err("sector size must be 512, 1024, 2048 or 4096".to_string());
 		}
+
 		// check that keyslots size is aligned to 4096
 		if (j.config.keyslots_size % 4096) != 0 {
 			return Err("config keyslots size must be aligned to 4096 bytes".to_string());
 		}
+
 		// check that all segments/keyslots references are valid
 		let refs_valid = j.digests.iter().all(|(_, d)| {
-			match d {
-				LuksDigest::pbkdf2 { keyslots, segments, .. } => {
-					keyslots.iter().all(|k| j.keyslots.contains_key(k)) &&
-					segments.iter().all(|s| j.keyslots.contains_key(s))
-				}
-			}
+			d.keyslots().iter().all(|k| j.keyslots.contains_key(k)) &&
+			d.segments().iter().all(|s| j.keyslots.contains_key(s))
 		});
 		if !refs_valid {
 			return Err("invalid keyslots/segment reference".to_string());
