@@ -1,5 +1,5 @@
 use gptman::GPT;
-use luks2::LuksHeader;
+use luks2::*;
 use windows_drives::BufferedPhysicalDrive;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 
