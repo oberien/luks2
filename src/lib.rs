@@ -3,14 +3,19 @@
 //! See `examples/dump_header_win.rs` for how to use this on windows, reading
 //! from a disk with a GPT.
 
+/// Recover information that was split antiforensically.
+pub mod af;
+
+/// Custom error types.
+pub mod error;
+
 use bincode::Options;
+use hmac::Hmac;
+use openssl::symm::{Cipher, decrypt};
+use self::error::{LuksError, ParseError};
 use serde::{Deserialize, Serialize, de::{self, Deserializer}};
-use std::{
-	collections::HashMap,
-	fmt::{Debug, Display},
-	io::Read,
-	str::FromStr
-};
+use sha2::Sha256;
+use std::{cmp::min, collections::HashMap, fmt::{Debug, Display}, io::{Cursor, Read, Seek, SeekFrom}, str::FromStr};
 #[macro_use]
 extern crate serde_big_array;
 
@@ -62,23 +67,20 @@ impl LuksHeader {
 	/// Attempt to read a LUKS2 header from a reader.
 	///
 	/// Note: a LUKS2 header is always exactly 4096 bytes long.
-	pub fn read_from<R: Read>(mut reader: &mut R) -> Result<Self, String> {
+	pub fn read_from<R: Read>(mut reader: &mut R) -> Result<Self, ParseError> {
 		let options = bincode::options()
 			.with_big_endian()
 			.with_fixint_encoding();
-		let h: Self = match options.deserialize_from(&mut reader) {
-			Ok(h) => h,
-			Err(e) => return Err(format!("{}", e))
-		};
+		let h: Self = options.deserialize_from(&mut reader)?;
 
 		// check magic value (must be "LUKS\xba\xbe" or "SKUL\xba\xbe")
 		if (h.magic != [0x4c, 0x55, 0x4b, 0x53, 0xba, 0xbe]) &&
 			(h.magic != [0x53, 0x4b, 0x55, 0x4c, 0xba, 0xbe]) {
-			return Err("magic value must be \"LUKS\\xba\\xbe\" or \"SKUL\\xba\\xbe\"".to_string());
+			return Err(ParseError::InvalidHeaderMagic);
 		}
 		// check header version
 		if h.version != 2 {
-			return Err("invalid header version number, only version 2 is supported".to_string())
+			return Err(ParseError::InvalidHeaderVersion(h.version))
 		}
 
 		Ok(h)
@@ -280,7 +282,7 @@ impl LuksKdf {
 }
 
 /// The priority of a [`LuksKeyslot`].
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Serialize)]
 // to match other enum variant names
 #[allow(non_camel_case_types)]
 pub enum LuksPriority {
@@ -577,18 +579,15 @@ pub struct LuksJson {
 impl LuksJson {
 	/// Attempt to read a LUKS2 JSON area from a reader. The reader must contain exactly the JSON data
 	/// and nothing more.
-	pub fn read_from<R: Read>(mut reader: &mut R) -> Result<Self, String> {
-		let j: Self = match serde_json::from_reader(&mut reader) {
-			Ok(j) => j,
-			Err(e) => return Err(format!("{}", e))
-		};
+	pub fn read_from<R: Read>(mut reader: &mut R) -> Result<Self, ParseError> {
+		let j: Self = serde_json::from_reader(&mut reader)?;
 
 		// check that the stripes value of all afs are 4000
 		let stripes_ok = j.keyslots.iter().all(|(_, k)| {
 			k.af().stripes() == 4000u16
 		});
 		if !stripes_ok {
-			return Err("stripe value of LuksAf must be 4000".to_string());
+			return Err(ParseError::InvalidStripes);
 		}
 
 		// check that sector sizes of all segments are valid
@@ -596,12 +595,12 @@ impl LuksJson {
 			vec![512, 1024, 2048, 4096].contains(&s.sector_size())
 		});
 		if !sector_sizes_valid {
-			return Err("sector size must be 512, 1024, 2048 or 4096".to_string());
+			return Err(ParseError::InvalidSectorSize);
 		}
 
 		// check that keyslots size is aligned to 4096
 		if (j.config.keyslots_size % 4096) != 0 {
-			return Err("config keyslots size must be aligned to 4096 bytes".to_string());
+			return Err(ParseError::KeyslotNotAligned);
 		}
 
 		// check that all segments/keyslots references are valid
@@ -610,7 +609,7 @@ impl LuksJson {
 			d.segments().iter().all(|s| j.keyslots.contains_key(s))
 		});
 		if !refs_valid {
-			return Err("invalid keyslots/segment reference".to_string());
+			return Err(ParseError::InvalidReference);
 		}
 
 		Ok(j)
@@ -662,7 +661,6 @@ where
     }
 }
 
-
 // helper function to deserialize a LuksSegmentSize
 fn deserialize_segment_size<'de, D>(deserializer: D) -> Result<LuksSegmentSize, D::Error>
 where
@@ -675,4 +673,158 @@ where
             LuksSegmentSize::fixed(u64::from_str(x).map_err(de::Error::custom)?)
         )
     }
+}
+
+/// A struct representing a LUKS device.
+#[derive(Debug)]
+pub struct LuksDevice<T: Read + Seek> {
+	device: T,
+	/// The header read from the device.
+	pub header: LuksHeader,
+	/// The JSON section read from the device.
+	pub json: LuksJson,
+	master_key: Vec<u8>,
+	/// The sector size of the device.
+	pub sector_size: usize
+}
+
+impl<T: Read + Seek> LuksDevice<T> {
+	/// Creates a `LuksDevice` from a device (i. e. any type that implements [`Read`] and [`Seek`]).
+	/// WARNING: this struct internally stores the master key in *user-space* RAM. Please consider the
+	/// security implications this may have.
+	pub fn from_device(mut device: T, password: &[u8], sector_size: usize) -> Result<Self, LuksError> {
+		// read and parse LuksHeader
+		let mut h = vec![0; 4096];
+		device.read_exact(&mut h)?;
+		let header = LuksHeader::read_from(&mut Cursor::new(&h))?;
+
+		// read and parse LuksJson
+		let mut j = vec![0; (header.hdr_size - 4096) as usize];
+		device.read_exact(&mut j)?;
+		let j: Vec<u8> = j.iter().map(|b| *b).filter(|b| *b != 0).collect();
+		let json = LuksJson::read_from(&mut Cursor::new(&j))?;
+
+		let master_key = Self::decrypt_master_key(password, &json, &mut device)?;
+
+		Ok(LuksDevice {
+			device,
+			header,
+			json,
+			master_key,
+			sector_size
+		})
+	}
+
+	// tries to decrypt the master key with the given password by trying all available keyslots
+	fn decrypt_master_key(password: &[u8], json: &LuksJson, device: &mut T) -> Result<Vec<u8>, LuksError>
+	where
+		T: Read + Seek
+	{
+		let mut keyslots: Vec<&LuksKeyslot> = json.keyslots.values().collect();
+		keyslots.sort_by_key(|&ks| ks.priority().unwrap_or(&LuksPriority::normal));
+
+		for &ks in keyslots.iter().rev() { // reverse to get highest priority first
+			match Self::decrypt_keyslot(password, ks, json, device) {
+				Ok(mk) => return Ok(mk),
+				Err(e) => match e {
+					LuksError::InvalidPassword => {},
+					_ => return Err(e)
+				}
+			}
+		}
+
+		Err(LuksError::InvalidPassword)
+	}
+
+	// tries to decrypt the specified keyslot using the given password
+	// if successful, returns the master key
+	fn decrypt_keyslot(password: &[u8], keyslot: &LuksKeyslot, json: &LuksJson, device: &mut T) -> Result<Vec<u8>, LuksError>
+	where
+		T: Read + Seek
+	{
+		let area = keyslot.area();
+		let af = keyslot.af();
+
+		// only sha256 is supported
+		if af.hash() != "sha256" {
+			return Err(LuksError::UnsupportedAfHash(af.hash().to_string()));
+		}
+
+		// read area of keyslot
+		let mut k = vec![0; keyslot.key_size() as usize * af.stripes() as usize];
+		device.seek(SeekFrom::Start(area.offset()))?;
+		device.read_exact(&mut k)?;
+
+		// compute master key as hash of password
+		let mut pw_hash = vec![0; area.key_size() as usize];
+		let kdf = keyslot.kdf();
+		if let LuksKdf::argon2i { salt, time, memory, cpus } = kdf {
+			let config = argon2::Config {
+				variant: argon2::Variant::Argon2i,
+				mem_cost: *memory,
+				time_cost: *time,
+				lanes: *cpus,
+				thread_mode: argon2::ThreadMode::Parallel,
+				hash_length: area.key_size(),
+				..argon2::Config::default()
+			};
+			let salt = base64::decode(&salt)?;
+			pw_hash = argon2::hash_raw(password, &salt, &config)?;
+		} else if let LuksKdf::pbkdf2 { salt, hash, iterations } = kdf {
+			assert_eq!(hash, "sha256");
+			let salt = base64::decode(salt)?;
+			pbkdf2::pbkdf2::<Hmac<Sha256>>(password, &salt, *iterations, &mut pw_hash);
+		}
+
+		// decrypt keyslot area using the password hash as key
+		let decrypted = Self::decrypt_sectors(&k, &pw_hash, 512,
+			0u128, Self::iv_plain64)?;
+
+		// merge and hash master key
+		let master_key = af::merge(&decrypted, keyslot.key_size() as usize, af.stripes() as usize);
+		let digest_actual = base64::decode(json.digests[&0].digest())?;
+		let mut digest_computed = vec![0; digest_actual.len()];
+		let salt = base64::decode(json.digests[&0].salt())?;
+		pbkdf2::pbkdf2::<Hmac<Sha256>>(&master_key, &salt, json.digests[&0].iterations(), &mut digest_computed);
+
+		// compare digests
+		if digest_computed == digest_actual {
+			Ok(master_key)
+		} else {
+			Err(LuksError::InvalidPassword)
+		}
+	}
+
+	// decrypts the given area sector by sector, using the given key and the IVs generated by `get_iv`
+	// `get_iv` is called with the previous sector number plus one, and the first call is with `sector_offset`
+	fn decrypt_sectors<F, S>(area: &[u8], key: &[u8], sector_size: usize, sector_offset: S, get_iv: F) -> Result<Vec<u8>, LuksError>
+	where
+		S: Into<u128>,
+		F: Fn(u128) -> [u8; 16] // iv is 16 bytes for AES-128-XTS as well as AES-256-XTS
+	{
+		let cipher = match key.len() {
+			32 => Cipher::aes_128_xts(),
+			64 => Cipher::aes_256_xts(),
+			x => return Err(LuksError::InvalidKeyLength(x))
+		};
+		let mut res = Vec::with_capacity(area.len());
+		let mut sector: u128 = sector_offset.into();
+		let mut bytes_to_decrypt = area.len();
+
+		while bytes_to_decrypt > 0 {
+			let iv = get_iv(sector);
+			let s = area.len() - bytes_to_decrypt;
+			let e = s + min(bytes_to_decrypt, sector_size);
+			let mut r = decrypt(cipher, key, Some(&iv), &area[s..e])?;
+			res.append(&mut r);
+			sector += 1;
+			bytes_to_decrypt -= e - s;
+		}
+		Ok(res)
+	}
+
+	// generator for "plain64" IV
+	fn iv_plain64(sector: u128) -> [u8; 16] {
+		sector.to_le_bytes()
+	}
 }
