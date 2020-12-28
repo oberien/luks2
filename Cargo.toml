@@ -1,7 +1,14 @@
 [package]
 name = "luks2"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Max von Forell <max@vonforell.de>"]
+license = "MIT"
+repository = "https://sr.ht/~mvforell/luks2"
+documentation = "https://docs.rs/luks2"
+description = "Interact with LUKS2 partitions from Rust"
+keywords = ["filesystem", "luks", "cryptography"]
+categories = ["filesystem", "cryptography"]
+readme = "README.md"
 edition = "2018"
 
 [lib]
@@ -26,7 +33,7 @@ thiserror = "1.0"
 gptman = { version = "0.7", default_features = false }
 
 [target.'cfg(windows)'.dev-dependencies]
-windows-drives = { git = "https://git.sr.ht/~mvforell/windows-drives" } # "0.2"
+windows-drives = "0.3"
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"
