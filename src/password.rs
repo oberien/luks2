@@ -13,8 +13,13 @@ pub fn read() -> Result<String, LuksError> {
 			Key(e) => {
 				match e.code {
 					KeyCode::Char(c) => { password.push(c); print_char('*')? },
-					KeyCode::Enter => { print_char('\n')?; break },
-					KeyCode::Backspace => { password.remove(password.len() - 1); delete_char()? },
+					KeyCode::Enter => { break },
+					KeyCode::Backspace => {
+						if password.len() > 0 {
+							password.remove(password.len() - 1);
+						}
+						delete_char()?
+					},
 					_ => {}
 				}
 			},
@@ -23,6 +28,7 @@ pub fn read() -> Result<String, LuksError> {
 	}
 
 	terminal::disable_raw_mode()?;
+	print_char('\n')?;
 
 	Ok(password)
 }
