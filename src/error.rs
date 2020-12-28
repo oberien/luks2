@@ -54,5 +54,8 @@ pub enum LuksError {
 	InvalidKeyLength(usize),
 
 	#[error("Error during decryption: {0}")]
-	DecryptionError(#[from] openssl::error::ErrorStack)
+	DecryptionError(#[from] openssl::error::ErrorStack),
+
+	#[error("Error during password input: {0}")]
+	PasswordError(#[from] crossterm::ErrorKind)
 }

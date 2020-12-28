@@ -9,6 +9,9 @@ pub mod af;
 /// Custom error types.
 pub mod error;
 
+/// Password input.
+pub mod password;
+
 use bincode::Options;
 use hmac::Hmac;
 use openssl::symm::{Cipher, decrypt};

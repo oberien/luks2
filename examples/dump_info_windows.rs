@@ -1,7 +1,6 @@
 use gptman::GPT;
 use luks2::*;
 use windows_drives::BufferedPhysicalDrive;
-use std::io::{Cursor, Read, Seek, SeekFrom};
 
 fn main() {
 	let drive_num = 0;
@@ -10,28 +9,21 @@ fn main() {
 
 	let gpt = GPT::find_from(&mut drive)
 		.expect("could not find GPT");
-	let partition=  gpt.iter().nth(1)
+	let partition = gpt.iter().nth(1)
 		.expect("could not get partition entry").1;
 
-	drive.seek(SeekFrom::Start(partition.starting_lba * drive.geometry.bytes_per_sector as u64))
-		.expect("could not seek drive");
-		let mut h = vec![0; 4096];
-		drive.read_exact(&mut h)
-			.expect("could not read luks header");
-	
-		let header = LuksHeader::read_from(&mut Cursor::new(h))
-			.expect("could not parse luks header");
-		println!("{}", header);
-	
-		let mut j = vec![0; (header.hdr_size - 4096) as usize];
-		drive.read_exact(&mut j)
-			.expect("could not read luks json area");
-		// remove trailing zeros
-		let j: Vec<u8> = j.iter().filter(|b| **b != 0).map(|b| *b).collect();
-		
-		let json = LuksJson::read_from(&mut Cursor::new(j))
-			.expect("could not parse luks json area");
-		println!("{:#?}", json);
+	let partition = BufferedPhysicalDrive::open_bounded(
+		drive_num, (partition.starting_lba, partition.ending_lba)
+	).expect("could not open partition");
 
-	drive.close();
+	println!("Enter password for partition: ");
+	let password = password::read().expect("could not read password");
+
+	let sector_size = partition.geometry.bytes_per_sector;
+	let luks_device = LuksDevice::from_device(
+		partition, password.as_bytes(), sector_size as usize
+	).expect("could not create luks device");
+
+	println!("{}", luks_device.header);
+	println!("{:#?}", luks_device.json);
 }
