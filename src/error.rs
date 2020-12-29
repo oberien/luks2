@@ -44,6 +44,9 @@ pub enum LuksError {
 	#[error("Unsupported hash function used by anti-forensic splitter: {0}")]
 	UnsupportedAfHash(String),
 
+	#[error("Unsupported key size: {0}")]
+	UnsupportedKeySize(u32),
+
 	#[error("Could not deserialize base64: {0}")]
 	Base64Error(#[from] base64::DecodeError),
 
@@ -52,9 +55,6 @@ pub enum LuksError {
 
 	#[error("Invalid key length: {0}. Valid lengths are 32 for AES-128-XTS or 64 for AES-256-XTS")]
 	InvalidKeyLength(usize),
-
-	#[error("Error during decryption: {0}")]
-	DecryptionError(#[from] openssl::error::ErrorStack),
 
 	#[error("Error during password input: {0}")]
 	PasswordError(#[from] crossterm::ErrorKind)
