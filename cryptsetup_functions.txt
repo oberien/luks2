@@ -1,6 +1,0 @@
-lib/luks2/luks2_keyslot_luks2.c:
-	84:  luks2_decrypt_from_storage()
-	286: luks2_keyslot_get_key() (!)
-
-lib/crypto_backend/crypto_storage.c:
-	262: crypt_storage_decrypt()
