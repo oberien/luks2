@@ -29,7 +29,7 @@ pub enum ParseError {
 	InvalidReference
 }
 
-/// Enum for errors arising during interaction with a [`LuksDevice`].
+/// Enum for errors arising during interaction with a [`LuksDevice`](crate::LuksDevice).
 #[derive(Debug, Error)]
 pub enum LuksError {
 	#[error("IO error: {0}")]

@@ -18,7 +18,7 @@ use openssl::symm::{Cipher, decrypt};
 use self::error::{LuksError, ParseError};
 use serde::{Deserialize, Serialize, de::{self, Deserializer}};
 use sha2::Sha256;
-use std::{cmp::min, collections::HashMap, fmt::{Debug, Display}, io::{Cursor, Read, Seek, SeekFrom}, str::FromStr};
+use std::{cmp::{max, min}, collections::HashMap, fmt::{Debug, Display}, io::{self, Cursor, ErrorKind, Read, Seek, SeekFrom}, str::FromStr};
 #[macro_use]
 extern crate serde_big_array;
 
@@ -362,7 +362,7 @@ impl LuksKeyslot {
 
 /// The LUKS2 user data integrity protection type, an experimental feature which is only included
 /// for parsing compatibility.
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct LuksIntegrity {
     #[serde(rename(deserialize = "type"))]
     pub integrity_type: String,
@@ -371,7 +371,7 @@ pub struct LuksIntegrity {
 }
 
 /// The size of a [`LuksSegment`].
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 // to match other enum variant names
 #[allow(non_camel_case_types)]
 pub enum LuksSegmentSize {
@@ -386,7 +386,7 @@ pub enum LuksSegmentSize {
 /// one data segment present.
 ///
 /// Only the `crypt` type is currently used.
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type")]
 // enum variant names must match the JSON values exactly, which are lowercase, so no CamelCase names
 #[allow(non_camel_case_types)]
@@ -682,13 +682,19 @@ where
 #[derive(Debug)]
 pub struct LuksDevice<T: Read + Seek> {
 	device: T,
+	master_key: Vec<u8>,
+	current_sector: Cursor<Vec<u8>>,
+	current_sector_num: u64,
 	/// The header read from the device.
 	pub header: LuksHeader,
 	/// The JSON section read from the device.
 	pub json: LuksJson,
-	master_key: Vec<u8>,
 	/// The sector size of the device.
-	pub sector_size: usize
+	pub sector_size: usize,
+	/// The segment used when reading from the device. Defaults to segment 0. Calls to `seek()` will
+	/// be considered relative to `active_segment.offset()` if seeking from the start or `active_segment.size()`
+	/// if seeking from the end.
+	pub active_segment: LuksSegment
 }
 
 impl<T: Read + Seek> LuksDevice<T> {
@@ -708,14 +714,21 @@ impl<T: Read + Seek> LuksDevice<T> {
 		let json = LuksJson::read_from(&mut Cursor::new(&j))?;
 
 		let master_key = Self::decrypt_master_key(password, &json, &mut device)?;
+		let active_segment = json.segments[&0].clone();
 
-		Ok(LuksDevice {
+		let mut d = LuksDevice {
 			device,
+			master_key,
+			current_sector: Cursor::new(vec![0; 256]),
+			current_sector_num: u64::MAX,
 			header,
 			json,
-			master_key,
-			sector_size
-		})
+			sector_size,
+			active_segment
+		};
+		d.seek(SeekFrom::Start(0))?;
+
+		Ok(d)
 	}
 
 	// tries to decrypt the master key with the given password by trying all available keyslots
@@ -760,23 +773,31 @@ impl<T: Read + Seek> LuksDevice<T> {
 
 		// compute master key as hash of password
 		let mut pw_hash = vec![0; area.key_size() as usize];
-		let kdf = keyslot.kdf();
-		if let LuksKdf::argon2i { salt, time, memory, cpus } = kdf {
-			let config = argon2::Config {
-				variant: argon2::Variant::Argon2i,
-				mem_cost: *memory,
-				time_cost: *time,
-				lanes: *cpus,
-				thread_mode: argon2::ThreadMode::Parallel,
-				hash_length: area.key_size(),
-				..argon2::Config::default()
-			};
-			let salt = base64::decode(&salt)?;
-			pw_hash = argon2::hash_raw(password, &salt, &config)?;
-		} else if let LuksKdf::pbkdf2 { salt, hash, iterations } = kdf {
-			assert_eq!(hash, "sha256");
-			let salt = base64::decode(salt)?;
-			pbkdf2::pbkdf2::<Hmac<Sha256>>(password, &salt, *iterations, &mut pw_hash);
+		match keyslot.kdf() {
+			LuksKdf::argon2i { salt, time, memory, cpus }
+			| LuksKdf::argon2id { salt, time, memory, cpus } => {
+				let variant = if let LuksKdf::argon2i { .. } = keyslot.kdf() {
+					argon2::Variant::Argon2i
+				} else {
+					argon2::Variant::Argon2id
+				};
+				let config = argon2::Config {
+					variant,
+					mem_cost: *memory,
+					time_cost: *time,
+					lanes: *cpus,
+					thread_mode: argon2::ThreadMode::Parallel,
+					hash_length: area.key_size(),
+					..argon2::Config::default()
+				};
+				let salt = base64::decode(&salt)?;
+				pw_hash = argon2::hash_raw(password, &salt, &config)?;
+			},
+			LuksKdf::pbkdf2 { salt, hash, iterations } => {
+				assert_eq!(hash, "sha256");
+				let salt = base64::decode(salt)?;
+				pbkdf2::pbkdf2::<Hmac<Sha256>>(password, &salt, *iterations, &mut pw_hash);
+			}
 		}
 
 		// decrypt keyslot area using the password hash as key
@@ -830,4 +851,112 @@ impl<T: Read + Seek> LuksDevice<T> {
 	fn iv_plain64(sector: u128) -> [u8; 16] {
 		sector.to_le_bytes()
 	}
+
+	// updates the internal state so that current sector is the one with the given number
+	// decrypts the sector, performs boundary checks (error if sector_num too small,
+	// geos to last sector if sector_num too big)
+	fn go_to_sector(&mut self, sector_num: u64) -> io::Result<()> {
+		if sector_num < (self.active_segment.offset() / self.active_segment.sector_size() as u64) {
+			return Err(io::Error::new(ErrorKind::InvalidInput, "tried to seek to position before active segment"));
+		}
+
+		let sector_size = self.active_segment.sector_size() as u64;
+		let sector_num = min(sector_num, self.active_segment_size()?);
+		let sector_pos = SeekFrom::Start(sector_num * sector_size);
+		self.device.seek(sector_pos)?;
+		let mut sector = vec![0; sector_size as usize];
+
+		if let Err(e) = self.device.read_exact(&mut sector) {
+			match e.kind() {
+				ErrorKind::UnexpectedEof => { // last sector of device is not of full length
+					// reset position and read again
+					self.device.seek(sector_pos)?;
+					sector = vec![0; sector_size as usize];
+					let bytes_read = self.device.read(&mut sector)?;
+					sector.resize(bytes_read, 0);
+				},
+				_ => return Err(e)
+			}
+		}
+
+		let iv = sector_num - (self.active_segment.offset() / self.active_segment.sector_size() as u64) + self.active_segment.iv_tweak();
+		let sector = Self::decrypt_sectors(
+			&sector, &self.master_key, sector_size as usize, iv, Self::iv_plain64
+		).map_err(|e| io::Error::new(ErrorKind::Other, e.to_string()))?;
+
+		self.current_sector = Cursor::new(sector);
+		self.current_sector_num = sector_num;
+
+		Ok(())
+	}
+
+	// returns the size of the active segment in bytes
+	fn active_segment_size(&mut self) -> io::Result<u64> {
+		Ok(match self.active_segment.size() {
+			LuksSegmentSize::fixed(s) => *s,
+			LuksSegmentSize::dynamic => {
+				let pos_before = self.device.seek(SeekFrom::Current(0))?;
+				let end = self.device.seek(SeekFrom::End(0))?;
+				self.device.seek(SeekFrom::Start(pos_before))?;
+				end
+			}
+		})
+	}
+}
+
+impl<T: Read + Seek> Read for LuksDevice<T> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.current_sector.position() == self.active_segment.sector_size() as u64 {
+			self.go_to_sector(self.current_sector_num + 1)?;
+		}
+
+		self.current_sector.read(buf)
+    }
+}
+
+impl<T: Read + Seek> Seek for LuksDevice<T> {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        match pos {
+            SeekFrom::Start(p) => {
+				let sector_size = self.active_segment.sector_size() as u64;
+				let p = p + self.active_segment.offset();
+				let sector = p / sector_size;
+				if sector != self.current_sector_num {
+					self.go_to_sector(sector)?;
+				}
+				self.current_sector.seek(SeekFrom::Start(p % sector_size))?;
+			},
+            SeekFrom::End(p) => {
+				let sector_size = self.active_segment.sector_size() as i128;
+				let p = max(0, p); // limit p to non-positive values (for p > 0 we seek to the end)
+				let end = self.active_segment_size()? as i128;
+				let sector = (end + p as i128) / sector_size;
+				if sector < 0 {
+					return Err(io::Error::new(ErrorKind::InvalidInput, "tried to seek to negative sector"));
+				}
+				if sector != self.current_sector_num as i128 {
+					self.go_to_sector(sector as u64)?;
+				}
+
+				let target_pos = (end + p as i128) - sector * sector_size;
+				self.current_sector.seek(SeekFrom::Start(target_pos as u64))?;
+			},
+            SeekFrom::Current(p) => {
+				let sector_size = self.active_segment.sector_size() as i128;
+				let current = self.current_sector_num as i128 * sector_size + self.current_sector.position() as i128;
+				let sector = (current + p as i128) / sector_size;
+				if sector < 0 {
+					return Err(io::Error::new(ErrorKind::InvalidInput, "tried to seek to negative sector"));
+				}
+				if sector != self.current_sector_num as i128 {
+					self.go_to_sector(sector as u64)?;
+				}
+
+				let target_pos = (current + p as i128) - sector * sector_size;
+				self.current_sector.seek(SeekFrom::Start(target_pos as u64))?;
+			}
+		}
+
+		Ok(self.current_sector_num * self.active_segment.sector_size() as u64 + self.current_sector.position())
+    }
 }
