@@ -838,7 +838,9 @@ impl<T: Read + Seek> LuksDevice<T> {
 	// decrypts the sector, performs boundary checks (returns an error if sector_num too small,
 	// goes to last sector if sector_num too big)
 	fn go_to_sector(&mut self, sector_num: u64) -> io::Result<()> {
-		if sector_num < (self.active_segment.offset() / self.active_segment.sector_size() as u64) {
+		if sector_num == self.current_sector_num {
+			return Ok(());
+		} else if sector_num < (self.active_segment.offset() / self.active_segment.sector_size() as u64) {
 			return Err(io::Error::new(ErrorKind::InvalidInput, "tried to seek to position before active segment"));
 		}
 
@@ -922,9 +924,7 @@ impl<T: Read + Seek> Seek for LuksDevice<T> {
 				let sector_size = self.active_segment.sector_size() as u64;
 				let p = p + self.active_segment.offset();
 				let sector = p / sector_size;
-				if sector != self.current_sector_num {
-					self.go_to_sector(sector)?;
-				}
+				self.go_to_sector(sector)?;
 				self.current_sector.seek(SeekFrom::Start(p % sector_size))?;
 			},
             SeekFrom::End(p) => {
@@ -935,9 +935,7 @@ impl<T: Read + Seek> Seek for LuksDevice<T> {
 				if sector < 0 {
 					return Err(io::Error::new(ErrorKind::InvalidInput, "tried to seek to negative sector"));
 				}
-				if sector != self.current_sector_num as i128 {
-					self.go_to_sector(sector as u64)?;
-				}
+				self.go_to_sector(sector as u64)?;
 
 				let target_pos = (end + p as i128) - sector * sector_size;
 				self.current_sector.seek(SeekFrom::Start(target_pos as u64))?;
@@ -949,9 +947,7 @@ impl<T: Read + Seek> Seek for LuksDevice<T> {
 				if sector < 0 {
 					return Err(io::Error::new(ErrorKind::InvalidInput, "tried to seek to negative sector"));
 				}
-				if sector != self.current_sector_num as i128 {
-					self.go_to_sector(sector as u64)?;
-				}
+				self.go_to_sector(sector as u64)?;
 
 				let target_pos = (current + p as i128) - sector * sector_size;
 				self.current_sector.seek(SeekFrom::Start(target_pos as u64))?;
