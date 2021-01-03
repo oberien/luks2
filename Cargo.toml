@@ -28,7 +28,7 @@ serde-big-array = "0.3"
 serde_json = "1.0"
 sha2 = "0.9"
 thiserror = "1.0"
-xts-mode = { git = "https://github.com/mvforell/xts-mode" }
+xts-mode = "0.3"
 
 [dev-dependencies]
 gptman = { version = "0.7", default_features = false }
