@@ -733,6 +733,11 @@ impl<T: Read + Seek> LuksDevice<T> {
 		Ok(d)
 	}
 
+	/// Returns the master key of this volume. WARNING: consider the security implications this may have.
+	pub fn master_key(&self) -> Vec<u8> {
+		self.master_key.clone()
+	}
+
 	// tries to decrypt the master key with the given password by trying all available keyslots
 	fn decrypt_master_key(password: &[u8], json: &LuksJson, device: &mut T, sector_size: usize) -> Result<Vec<u8>, LuksError>
 	where
