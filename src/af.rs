@@ -1,12 +1,12 @@
 use sha2::{Digest, Sha256};
 
-fn xor_block(src1: &[u8], src2: &[u8], dst: &mut [u8], n: usize) {
+fn xor_block(src: &[u8], dst: &mut [u8], n: usize) {
 	for j in 0..n {
-		dst[j] = src1[j] ^ src2[j];
+		dst[j] = src[j] ^ dst[j];
 	}
 }
 
-fn diffuse(src: &[u8], dst: &mut [u8], size: usize) {
+fn diffuse(buf: &mut [u8], size: usize) {
 	let mut sha256 = Sha256::new();
 	let digest_size = Sha256::output_size();
 	let blocks = size / digest_size;
@@ -21,23 +21,24 @@ fn diffuse(src: &[u8], dst: &mut [u8], size: usize) {
 		} else {
 			s + digest_size
 		};
-		sha256.update(&src[s..e]);
-		dst[s..e].copy_from_slice(&sha256.finalize_reset()[..]);
+		sha256.update(&buf[s..e]);
+		buf[s..e].copy_from_slice(&sha256.finalize_reset()[..]);
 	}
 }
 
 /// Recovers information from data that was split with `cryptsetup`'s `afsplitter` implementation.
 ///
-/// The blocksize and blocknumber values must be the same as when splitting the information. Only SHA-256 is supported.
+/// The blocksize and blocknumber values must be the same as when splitting the information.
+/// Only SHA-256 is supported (which is was `cryptsetup` uses).
 pub fn merge(src: &[u8], blocksize: usize, blocknumbers: usize) -> Vec<u8> {
 	let mut bufblock = vec![0; blocksize];
 
 	for i in 0..blocknumbers {
 		let s = blocksize * i;
 		let e = s + blocksize;
-		xor_block(&src[s..e], &bufblock.clone(), &mut bufblock, blocksize);
+		xor_block(&src[s..e], &mut bufblock, blocksize);
 		if i < (blocknumbers - 1) {
-			diffuse(&bufblock.clone(), &mut bufblock, blocksize);
+			diffuse(&mut bufblock, blocksize);
 		}
 	}
 
