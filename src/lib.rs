@@ -1,7 +1,12 @@
 //! This crate defines data structures to interact with a LUKS2 partition.
 //!
-//! See `examples/dump_header_win.rs` for how to use this on windows, reading
-//! from a disk with a GPT.
+//! See the `examples/` folder for how to use this with a real partition
+//! or an .iso file on Linux and Windows (all examples need to be modified
+//! or require creating some files before they work correctly).
+//!
+//! You'll probably want to compile in release mode most of the time, or else
+//! the master key extraction (which happens everytime a `LuksDevice` is
+//! created) will take quite a long time.
 
 /// Recover information that was split antiforensically.
 pub mod af;
@@ -738,6 +743,19 @@ impl<T: Read + Seek> LuksDevice<T> {
 		self.master_key.clone()
 	}
 
+	/// The size of the active segment in bytes.
+	pub fn active_segment_size(&mut self) -> io::Result<u64> {
+		Ok(match self.active_segment.size() {
+			LuksSegmentSize::fixed(s) => *s,
+			LuksSegmentSize::dynamic => {
+				let pos_before = self.device.seek(SeekFrom::Current(0))?;
+				let end = self.device.seek(SeekFrom::End(0))?;
+				self.device.seek(SeekFrom::Start(pos_before))?;
+				end - self.active_segment.offset()
+			}
+		})
+	}
+
 	// tries to decrypt the master key with the given password by trying all available keyslots
 	fn decrypt_master_key(password: &[u8], json: &LuksJson, device: &mut T, sector_size: usize) -> Result<Vec<u8>, LuksError>
 	where
@@ -896,19 +914,6 @@ impl<T: Read + Seek> LuksDevice<T> {
 		self.current_sector_num = sector_num;
 
 		Ok(())
-	}
-
-	// returns the size of the active segment in bytes
-	fn active_segment_size(&mut self) -> io::Result<u64> {
-		Ok(match self.active_segment.size() {
-			LuksSegmentSize::fixed(s) => *s,
-			LuksSegmentSize::dynamic => {
-				let pos_before = self.device.seek(SeekFrom::Current(0))?;
-				let end = self.device.seek(SeekFrom::End(0))?;
-				self.device.seek(SeekFrom::Start(pos_before))?;
-				end
-			}
-		})
 	}
 }
 
