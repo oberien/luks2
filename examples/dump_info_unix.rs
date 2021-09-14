@@ -6,21 +6,25 @@ use std::{fs::File, os::unix::prelude::AsRawFd};
 extern crate nix;
 
 fn main() {
-	let path = "/dev/nvme0n1p2";
-	let partition = File::open(path).expect("could not open partition (are you root?)");
-	
-	let sector_size = unsafe {
-		let mut ss: libc::size_t = 0;
-		ioctl(partition.as_raw_fd(), request_code_none!(0x12, 104), &mut ss);
-		ss
-	};
+    let path = "/dev/nvme0n1p2";
+    let partition = File::open(path).expect("could not open partition (are you root?)");
 
-	println!("Enter password for partition: ");
-	let password = password::read().expect("could not read password");
+    let sector_size = unsafe {
+        let mut ss: libc::size_t = 0;
+        ioctl(
+            partition.as_raw_fd(),
+            request_code_none!(0x12, 104),
+            &mut ss,
+        );
+        ss
+    };
 
-	let luks_device = LuksDevice::from_device(partition, password.as_bytes(), sector_size)
-		.expect("could not create luks device");
+    println!("Enter password for partition: ");
+    let password = password::read().expect("could not read password");
 
-	println!("{}", luks_device.header);
-	println!("{:#?}", luks_device.json);
+    let luks_device = LuksDevice::from_device(partition, password.as_bytes(), sector_size)
+        .expect("could not create luks device");
+
+    println!("{}", luks_device.header);
+    println!("{:#?}", luks_device.json);
 }
