@@ -1,4 +1,5 @@
 use luks2::*;
+use secrecy::ExposeSecret;
 use std::io::{Read, Seek, SeekFrom};
 use windows_drives::BufferedHarddiskVolume;
 
@@ -10,9 +11,12 @@ fn main() {
     let password = password::read().expect("could not read password");
 
     let sector_size = partition.geometry.bytes_per_sector;
-    let mut luks_device =
-        LuksDevice::from_device(partition, password.as_bytes(), sector_size as usize)
-            .expect("could not create luks device");
+    let mut luks_device = LuksDevice::from_device(
+        partition,
+        password.expose_secret().as_bytes(),
+        sector_size as usize,
+    )
+    .expect("could not create luks device");
 
     println!("{}", luks_device.header);
     println!("{:#?}", luks_device.json);

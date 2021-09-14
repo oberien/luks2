@@ -6,12 +6,13 @@ use crossterm::{
     style::Print,
     terminal,
 };
+use secrecy::{Secret, SecretString};
 use std::io::stdout;
 
 /// Reads a password from stdin, replacing every typed character with a '*' and returning on Enter.
 ///
 /// Supports deleting already entered characters via backspace. Does not prompt for input.
-pub fn read() -> Result<String, LuksError> {
+pub fn read() -> Result<SecretString, LuksError> {
     terminal::enable_raw_mode()?;
     let mut password = String::with_capacity(10);
     loop {
@@ -37,7 +38,7 @@ pub fn read() -> Result<String, LuksError> {
     terminal::disable_raw_mode()?;
     print_char('\n')?;
 
-    Ok(password)
+    Ok(Secret::new(password))
 }
 
 fn print_char(c: char) -> Result<(), LuksError> {

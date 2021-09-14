@@ -1,6 +1,6 @@
 [package]
 name = "luks2"
-version = "0.4.1"
+version = "0.5.0"
 authors = ["Max von Forell <max@vonforell.de>"]
 license = "MIT"
 repository = "https://sr.ht/~mvforell/luks2"
@@ -23,6 +23,7 @@ crossterm = "0.19"
 hmac = "0.11"
 pbkdf2 = { version = "0.8", default_features = false }
 rust-argon2 = "0.8"
+secrecy = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde-big-array = "0.3"
 serde_json = "1.0"

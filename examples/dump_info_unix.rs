@@ -1,5 +1,6 @@
 use libc::ioctl;
 use luks2::*;
+use secrecy::ExposeSecret;
 use std::{fs::File, os::unix::prelude::AsRawFd};
 
 #[macro_use]
@@ -22,8 +23,9 @@ fn main() {
     println!("Enter password for partition: ");
     let password = password::read().expect("could not read password");
 
-    let luks_device = LuksDevice::from_device(partition, password.as_bytes(), sector_size)
-        .expect("could not create luks device");
+    let luks_device =
+        LuksDevice::from_device(partition, password.expose_secret().as_bytes(), sector_size)
+            .expect("could not create luks device");
 
     println!("{}", luks_device.header);
     println!("{:#?}", luks_device.json);

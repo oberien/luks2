@@ -21,6 +21,7 @@ use self::error::{LuksError, ParseError};
 use aes::{Aes128, Aes256, NewBlockCipher};
 use bincode::Options;
 use hmac::Hmac;
+use secrecy::{CloneableSecret, DebugSecret, ExposeSecret, Secret, Zeroize};
 use serde::{
     de::{self, Deserializer},
     Deserialize, Serialize,
@@ -716,11 +717,26 @@ where
     }
 }
 
+#[derive(Clone)]
+pub struct MasterKey(Vec<u8>);
+
+impl Zeroize for MasterKey {
+    fn zeroize(&mut self) {
+        self.0.zeroize()
+    }
+}
+
+impl DebugSecret for MasterKey {}
+
+impl CloneableSecret for MasterKey {}
+
+pub type SecretMasterKey = Secret<MasterKey>;
+
 /// A struct representing a LUKS device.
 #[derive(Debug)]
 pub struct LuksDevice<T: Read + Seek> {
     device: T,
-    master_key: Vec<u8>,
+    master_key: SecretMasterKey,
     current_sector: Cursor<Vec<u8>>,
     current_sector_num: u64,
     /// The header read from the device.
@@ -774,7 +790,7 @@ impl<T: Read + Seek> LuksDevice<T> {
     }
 
     /// Returns the master key of this volume. WARNING: consider the security implications this may have.
-    pub fn master_key(&self) -> Vec<u8> {
+    pub fn master_key(&self) -> SecretMasterKey {
         self.master_key.clone()
     }
 
@@ -797,7 +813,7 @@ impl<T: Read + Seek> LuksDevice<T> {
         json: &LuksJson,
         device: &mut T,
         sector_size: usize,
-    ) -> Result<Vec<u8>, LuksError>
+    ) -> Result<SecretMasterKey, LuksError>
     where
         T: Read + Seek,
     {
@@ -826,7 +842,7 @@ impl<T: Read + Seek> LuksDevice<T> {
         json: &LuksJson,
         device: &mut T,
         sector_size: usize,
-    ) -> Result<Vec<u8>, LuksError>
+    ) -> Result<SecretMasterKey, LuksError>
     where
         T: Read + Seek,
     {
@@ -886,30 +902,40 @@ impl<T: Read + Seek> LuksDevice<T> {
             }
         }
 
+        // make pw_hash a secret after hashing
+        let pw_hash = Secret::new(pw_hash);
+
         // decrypt keyslot area using the password hash as key
         match area.key_size() {
             32 => {
-                let key1 = Aes128::new_from_slice(&pw_hash[..16]).unwrap();
-                let key2 = Aes128::new_from_slice(&pw_hash[16..]).unwrap();
+                let key1 = Aes128::new_from_slice(&pw_hash.expose_secret()[..16]).unwrap();
+                let key2 = Aes128::new_from_slice(&pw_hash.expose_secret()[16..]).unwrap();
                 let xts = Xts128::<Aes128>::new(key1, key2);
                 xts.decrypt_area(&mut k, sector_size, 0, get_tweak_default);
             }
             64 => {
-                let key1 = Aes256::new_from_slice(&pw_hash[..32]).unwrap();
-                let key2 = Aes256::new_from_slice(&pw_hash[32..]).unwrap();
+                let key1 = Aes256::new_from_slice(&pw_hash.expose_secret()[..32]).unwrap();
+                let key2 = Aes256::new_from_slice(&pw_hash.expose_secret()[32..]).unwrap();
                 let xts = Xts128::<Aes256>::new(key1, key2);
                 xts.decrypt_area(&mut k, sector_size, 0, get_tweak_default);
             }
             x => return Err(LuksError::UnsupportedKeySize(x)),
         }
 
+        // make k a secret after decryption
+        let k = Secret::new(k);
+
         // merge and hash master key
-        let master_key = af::merge(&k, keyslot.key_size() as usize, af.stripes() as usize);
+        let master_key = Secret::new(MasterKey(af::merge(
+            &k.expose_secret(),
+            keyslot.key_size() as usize,
+            af.stripes() as usize,
+        )));
         let digest_actual = base64::decode(json.digests[&0].digest())?;
         let mut digest_computed = vec![0; digest_actual.len()];
         let salt = base64::decode(json.digests[&0].salt())?;
         pbkdf2::pbkdf2::<Hmac<Sha256>>(
-            &master_key,
+            &master_key.expose_secret().0,
             &salt,
             json.digests[&0].iterations(),
             &mut digest_computed,
@@ -970,16 +996,20 @@ impl<T: Read + Seek> LuksDevice<T> {
             let iv = sector_num
                 - (self.active_segment.offset() / self.active_segment.sector_size() as u64);
             let iv = get_tweak_default((iv + self.active_segment.iv_tweak()) as u128);
-            match self.master_key.len() {
+            match self.master_key.expose_secret().0.len() {
                 32 => {
-                    let key1 = Aes128::new_from_slice(&self.master_key[..16]).unwrap();
-                    let key2 = Aes128::new_from_slice(&self.master_key[16..]).unwrap();
+                    let key1 =
+                        Aes128::new_from_slice(&self.master_key.expose_secret().0[..16]).unwrap();
+                    let key2 =
+                        Aes128::new_from_slice(&self.master_key.expose_secret().0[16..]).unwrap();
                     let xts = Xts128::<Aes128>::new(key1, key2);
                     xts.decrypt_sector(&mut sector, iv);
                 }
                 64 => {
-                    let key1 = Aes256::new_from_slice(&self.master_key[..32]).unwrap();
-                    let key2 = Aes256::new_from_slice(&self.master_key[32..]).unwrap();
+                    let key1 =
+                        Aes256::new_from_slice(&self.master_key.expose_secret().0[..32]).unwrap();
+                    let key2 =
+                        Aes256::new_from_slice(&self.master_key.expose_secret().0[32..]).unwrap();
                     let xts = Xts128::<Aes256>::new(key1, key2);
                     xts.decrypt_sector(&mut sector, iv);
                 }
