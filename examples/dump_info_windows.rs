@@ -1,9 +1,10 @@
-use luks2::*;
-use secrecy::ExposeSecret;
-use std::io::{Read, Seek, SeekFrom};
-use windows_drives::BufferedHarddiskVolume;
-
+#[cfg(windows)]
 fn main() {
+    use luks2::*;
+    use secrecy::ExposeSecret;
+    use std::io::{Read, Seek, SeekFrom};
+    use windows_drives::BufferedHarddiskVolume;
+
     let partition_num = 12;
     let partition = BufferedHarddiskVolume::open(partition_num).expect("could not open partition");
 
@@ -30,4 +31,9 @@ fn main() {
         .read_exact(&mut sector)
         .expect("could not read from luks device");
     println!("{:?}", sector);
+}
+
+#[cfg(not(windows))]
+fn main() {
+    eprintln!("this example only works on Windows");
 }
