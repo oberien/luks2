@@ -995,6 +995,8 @@ impl<T: Read + Seek> LuksDevice<T> {
         if sector.len() != 0 {
             let iv = sector_num
                 - (self.active_segment.offset() / self.active_segment.sector_size() as u64);
+            // the iv isn't the index of sector_size sectors, but instead the index of 512-byte sectors
+            let iv = iv * (self.active_segment.sector_size() as u64 / 512);
             let iv = get_tweak_default((iv + self.active_segment.iv_tweak()) as u128);
             match self.master_key.expose_secret().0.len() {
                 32 => {

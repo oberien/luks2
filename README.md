@@ -6,3 +6,7 @@ Interact with (currently: read metadata and data from) LUKS2 partitions from Rus
 
 Build with `RUSTFLAGS="-C target-feature=+aes"` to use the AES processor instruction set (if
 available on your platform).
+
+## Changes compared to original
+
+* fix a bug where decryption fails due to an invalid iv when the sector_size is not 512
