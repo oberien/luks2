@@ -1,10 +1,11 @@
-use thiserror::Error;
+use alloc::string::String;
+use thiserror_no_std::Error;
 
 /// Enum for errors arising during parsing.
 #[derive(Debug, Error)]
 pub enum ParseError {
     #[error("Deserialization error: {0}")]
-    BincodeError(#[from] Box<bincode::ErrorKind>),
+    BincodeError(#[from] bincode::error::DecodeError),
 
     #[error("Invalid magic value in header: must be \"LUKS\\xba\\xbe\" or \"SKUL\\xba\\xbe\"")]
     InvalidHeaderMagic,
@@ -35,7 +36,7 @@ pub enum ParseError {
 #[derive(Debug, Error)]
 pub enum LuksError {
     #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
+    IoError(#[from] acid_io::Error),
 
     #[error("Parsing error: {0}")]
     ParseError(#[from] self::ParseError),

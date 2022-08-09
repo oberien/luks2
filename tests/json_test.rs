@@ -83,7 +83,7 @@ fn parse_json() {
 	};
 
 	let data = include_bytes!("test.json");
-	let parsed = LuksJson::read_from(&mut Cursor::new(data)).unwrap();
+	let parsed = LuksJson::from_slice(data).unwrap();
 	
 	assert_eq!(parsed, expected)
 }

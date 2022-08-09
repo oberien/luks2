@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
 //! This crate defines data structures to interact with a LUKS2 partition.
 //!
 //! See the `examples/` folder for how to use this with a real partition
@@ -8,6 +10,9 @@
 //! the master key extraction (which happens everytime a `LuksDevice` is
 //! created) will take quite a long time.
 
+
+extern crate alloc;
+
 /// Recover information that was split antiforensically.
 pub mod af;
 
@@ -15,11 +20,15 @@ pub mod af;
 pub mod error;
 
 /// Password input.
+#[cfg(feature = "std")]
 pub mod password;
 
+use alloc::collections::BTreeMap;
+use alloc::{format, vec};
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 use self::error::{LuksError, ParseError};
 use aes::{Aes128, Aes256, NewBlockCipher};
-use bincode::Options;
 use hmac::Hmac;
 use secrecy::{CloneableSecret, DebugSecret, ExposeSecret, Secret, Zeroize};
 use serde::{
@@ -27,13 +36,14 @@ use serde::{
     Deserialize, Serialize,
 };
 use sha2::Sha256;
-use std::{
+use core::{
     cmp::max,
-    collections::HashMap,
     fmt::{Debug, Display},
-    io::{self, Cursor, ErrorKind, Read, Seek, SeekFrom},
     str::FromStr,
 };
+use acid_io::{self, Cursor, ErrorKind, Read, Seek, SeekFrom};
+use bincode::Decode;
+use bincode::serde::BorrowCompat;
 use xts_mode::{get_tweak_default, Xts128};
 
 #[macro_use]
@@ -46,7 +56,7 @@ big_array! {
 
 /// A LUKS2 header as described
 /// [here](https://gitlab.com/cryptsetup/LUKS2-docs/blob/master/luks2_doc_wip.pdf).
-#[derive(Deserialize, PartialEq, Serialize)]
+#[derive(Decode, PartialEq)]
 pub struct LuksHeader {
     /// must be "LUKS\xba\xbe" or "SKUL\xba\xbe"
     pub magic: [u8; 6],
@@ -57,29 +67,29 @@ pub struct LuksHeader {
     /// sequence ID, increased on update
     pub seqid: u64,
     /// ASCII label or empty
-    #[serde(with = "BigArray")]
+    // #[serde(with = "BigArray")]
     pub label: [u8; 48],
     /// checksum algorithm, "sha256"
     pub csum_alg: [u8; 32],
     /// salt, unique for every header
-    #[serde(with = "BigArray")]
+    // #[serde(with = "BigArray")]
     pub salt: [u8; 64],
     /// UUID of device
-    #[serde(with = "BigArray")]
+    // #[serde(with = "BigArray")]
     pub uuid: [u8; 40],
     /// owner subsystem label or empty
-    #[serde(with = "BigArray")]
+    // #[serde(with = "BigArray")]
     pub subsystem: [u8; 48],
     /// offset from device start in bytes
     pub hdr_offset: u64,
     // must be zeroed
-    #[serde(with = "BigArray")]
+    // #[serde(with = "BigArray")]
     _padding: [u8; 184],
     /// header checksum
-    #[serde(with = "BigArray")]
+    // #[serde(with = "BigArray")]
     pub csum: [u8; 64],
     // Padding, must be zeroed
-    #[serde(with = "BigArray")]
+    // #[serde(with = "BigArray")]
     _padding4069: [u8; 7 * 512],
 }
 
@@ -87,9 +97,11 @@ impl LuksHeader {
     /// Attempt to read a LUKS2 header from a reader.
     ///
     /// Note: a LUKS2 header is always exactly 4096 bytes long.
-    pub fn read_from<R: Read>(mut reader: &mut R) -> Result<Self, ParseError> {
-        let options = bincode::options().with_big_endian().with_fixint_encoding();
-        let h: Self = options.deserialize_from(&mut reader)?;
+    pub fn from_slice(slice: &[u8]) -> Result<Self, ParseError> {
+        let options = bincode::config::legacy().with_big_endian().with_fixed_int_encoding().skip_fixed_array_length();
+        let h: Self = bincode::decode_from_slice(slice, options)?.0;
+        // let h: BorrowCompat<Self> = bincode::decode_from_slice(slice, options)?.0;
+        // let h = h.0;
 
         // check magic value (must be "LUKS\xba\xbe" or "SKUL\xba\xbe")
         if (h.magic != [0x4c, 0x55, 0x4b, 0x53, 0xba, 0xbe])
@@ -108,7 +120,7 @@ impl LuksHeader {
 
 // implement manually to omit always-zero padding sections
 impl Debug for LuksHeader {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
             "{}",
@@ -133,12 +145,12 @@ impl Debug for LuksHeader {
 }
 
 impl Display for LuksHeader {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         fn bytes_to_str<'a>(empty_text: &'static str, bytes: &'a [u8]) -> &'a str {
             if bytes.iter().all(|el| *el == 0) {
                 empty_text
             } else {
-                match std::str::from_utf8(bytes) {
+                match core::str::from_utf8(bytes) {
                     Ok(s) => s,
                     Err(_) => "<decoding error>",
                 }
@@ -607,14 +619,14 @@ pub struct LuksToken {}
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 pub struct LuksJson {
     /// Objects describing encrypted keys storage areas.
-    pub keyslots: HashMap<u8, LuksKeyslot>,
+    pub keyslots: BTreeMap<u8, LuksKeyslot>,
     /// Tokens can optionally include additional metadata. Only included for parsing compatibility.
-    pub tokens: HashMap<u8, LuksToken>,
+    pub tokens: BTreeMap<u8, LuksToken>,
     /// Segments describe areas on disk that contain user encrypted data.
-    pub segments: HashMap<u8, LuksSegment>,
+    pub segments: BTreeMap<u8, LuksSegment>,
     /// Digests are used to verify that keys decrypted from keyslots are correct. Uses the keys
     /// of keyslots and segments to reference them.
-    pub digests: HashMap<u8, LuksDigest>,
+    pub digests: BTreeMap<u8, LuksDigest>,
     /// Persistent header configuration attributes.
     pub config: LuksConfig,
 }
@@ -622,8 +634,8 @@ pub struct LuksJson {
 impl LuksJson {
     /// Attempt to read a LUKS2 JSON area from a reader. The reader must contain exactly the JSON data
     /// and nothing more.
-    pub fn read_from<R: Read>(mut reader: &mut R) -> Result<Self, ParseError> {
-        let j: Self = serde_json::from_reader(&mut reader)?;
+    pub fn from_slice(slice: &[u8]) -> Result<Self, ParseError> {
+        let j: Self = serde_json::from_slice(slice)?;
 
         // check that the stripes value of all afs are 4000
         let stripes_ok = j.keyslots.iter().all(|(_, k)| k.af().stripes() == 4000u16);
@@ -763,13 +775,13 @@ impl<T: Read + Seek> LuksDevice<T> {
         // read and parse LuksHeader
         let mut h = vec![0; 4096];
         device.read_exact(&mut h)?;
-        let header = LuksHeader::read_from(&mut Cursor::new(&h))?;
+        let header = LuksHeader::from_slice(&h)?;
 
         // read and parse LuksJson
         let mut j = vec![0; (header.hdr_size - 4096) as usize];
         device.read_exact(&mut j)?;
         let j: Vec<u8> = j.iter().map(|b| *b).filter(|b| *b != 0).collect();
-        let json = LuksJson::read_from(&mut Cursor::new(&j))?;
+        let json = LuksJson::from_slice(&j)?;
 
         let master_key = Self::decrypt_master_key(password, &json, &mut device, sector_size)?;
         let active_segment = json.segments[&0].clone();
@@ -795,7 +807,7 @@ impl<T: Read + Seek> LuksDevice<T> {
     }
 
     /// The size of the active segment in bytes.
-    pub fn active_segment_size(&mut self) -> io::Result<u64> {
+    pub fn active_segment_size(&mut self) -> acid_io::Result<u64> {
         Ok(match self.active_segment.size() {
             LuksSegmentSize::fixed(s) => *s,
             LuksSegmentSize::dynamic => {
@@ -952,13 +964,13 @@ impl<T: Read + Seek> LuksDevice<T> {
     // updates the internal state so that current sector is the one with the given number
     // decrypts the sector, performs boundary checks (returns an error if sector_num too small,
     // goes to last sector if sector_num too big)
-    fn go_to_sector(&mut self, sector_num: u64) -> io::Result<()> {
+    fn go_to_sector(&mut self, sector_num: u64) -> acid_io::Result<()> {
         if sector_num == self.current_sector_num {
             return Ok(());
         } else if sector_num
             < (self.active_segment.offset() / self.active_segment.sector_size() as u64)
         {
-            return Err(io::Error::new(
+            return Err(acid_io::Error::new(
                 ErrorKind::InvalidInput,
                 "tried to seek to position before active segment",
             ));
@@ -975,7 +987,7 @@ impl<T: Read + Seek> LuksDevice<T> {
         }
 
         let sector_pos = SeekFrom::Start(sector_num * sector_size);
-        self.device.seek(sector_pos)?;
+        self.device.seek(sector_pos.clone())?;
         let mut sector = vec![0; sector_size as usize];
 
         if let Err(e) = self.device.read_exact(&mut sector) {
@@ -1016,7 +1028,7 @@ impl<T: Read + Seek> LuksDevice<T> {
                     xts.decrypt_sector(&mut sector, iv);
                 }
                 x => {
-                    return Err(io::Error::new(
+                    return Err(acid_io::Error::new(
                         ErrorKind::InvalidInput,
                         format!("Unsupported key size: {}", x),
                     ))
@@ -1032,7 +1044,7 @@ impl<T: Read + Seek> LuksDevice<T> {
 }
 
 impl<T: Read + Seek> Read for LuksDevice<T> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    fn read(&mut self, buf: &mut [u8]) -> acid_io::Result<usize> {
         if self.current_sector.position() == self.active_segment.sector_size() as u64 {
             self.go_to_sector(self.current_sector_num + 1)?;
         }
@@ -1042,7 +1054,7 @@ impl<T: Read + Seek> Read for LuksDevice<T> {
 }
 
 impl<T: Read + Seek> Seek for LuksDevice<T> {
-    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+    fn seek(&mut self, pos: SeekFrom) -> acid_io::Result<u64> {
         match pos {
             SeekFrom::Start(p) => {
                 let sector_size = self.active_segment.sector_size() as u64;
@@ -1057,7 +1069,7 @@ impl<T: Read + Seek> Seek for LuksDevice<T> {
                 let end = self.active_segment_size()? as i128;
                 let sector = (end + p as i128) / sector_size;
                 if sector < 0 {
-                    return Err(io::Error::new(
+                    return Err(acid_io::Error::new(
                         ErrorKind::InvalidInput,
                         "tried to seek to negative sector",
                     ));
@@ -1074,7 +1086,7 @@ impl<T: Read + Seek> Seek for LuksDevice<T> {
                     + self.current_sector.position() as i128;
                 let sector = (current + p as i128) / sector_size;
                 if sector < 0 {
-                    return Err(io::Error::new(
+                    return Err(acid_io::Error::new(
                         ErrorKind::InvalidInput,
                         "tried to seek to negative sector",
                     ));

@@ -1,3 +1,5 @@
+use alloc::vec;
+use alloc::vec::Vec;
 use sha2::{Digest, Sha256};
 
 fn xor_block(src: &[u8], dst: &mut [u8], n: usize) {
