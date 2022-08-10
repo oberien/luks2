@@ -43,7 +43,6 @@ use core::{
 };
 use acid_io::{self, Cursor, ErrorKind, Read, Seek, SeekFrom};
 use bincode::Decode;
-use bincode::serde::BorrowCompat;
 use xts_mode::{get_tweak_default, Xts128};
 
 #[macro_use]
@@ -977,7 +976,7 @@ impl<T: Read + Seek> LuksDevice<T> {
         }
 
         let sector_size = self.active_segment.sector_size() as u64;
-        let mut max_sector = self.active_segment_size()? / sector_size;
+        let mut max_sector = (self.active_segment_size()? + self.active_segment.offset()) / sector_size;
         if (self.active_segment_size()? % sector_size) != 0 {
             max_sector += 1;
         }
