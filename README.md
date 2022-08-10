@@ -12,3 +12,4 @@ available on your platform).
 * fix a bug where decryption fails due to an invalid iv when the sector_size is not 512
 * add no_std support
 * fix a bug where the final 16MB (segment-offset) of a segment weren't read
+* fix a bug where the last sector wasn't read fully

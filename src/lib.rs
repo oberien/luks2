@@ -995,9 +995,8 @@ impl<T: Read + Seek> LuksDevice<T> {
                     // last sector of device is not of full length
                     // reset position and read again
                     self.device.seek(sector_pos)?;
-                    sector = vec![0; sector_size as usize];
-                    let bytes_read = self.device.read(&mut sector)?;
-                    sector.resize(bytes_read, 0);
+                    sector.clear();
+                    acid_io::copy(&mut self.device, &mut sector)?;
                 }
                 _ => return Err(e),
             }
