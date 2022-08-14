@@ -16,25 +16,25 @@ name = "luks2"
 path = "./src/lib.rs"
 
 [dependencies]
-aes = "0.7"
-base64 = "0.13"
-bincode = { version = "2.0.0-rc.1", default-features = false, features = ["alloc", "derive", "serde"] }
-crossterm = "0.19"
+aes = "0.8"
+base64 = { version = "0.13", default-features = false, features = ["alloc"] }
+bincode = { version = "2.0.0-rc.1", default-features = false, features = ["alloc", "derive"] }
+crossterm = { version = "0.19", optional = true }
 hmac = "0.11"
 pbkdf2 = { version = "0.8", default_features = false }
-rust-argon2 = "0.8"
+argon2 = "0.4.1"
 secrecy = "0.8"
 serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
 serde-big-array = "0.3"
 serde_json = { version = "1.0.83", default-features = false, features = ["alloc"] }
-sha2 = "0.9"
+sha2 = { version = "0.9", default-features = false }
 thiserror-no-std = "2.0.2"
-xts-mode = "0.4"
+xts-mode = { version = "0.5", default-features = false }
 acid_io = { version = "0.1.0", features = ["alloc"] }
 
 [features]
 default = ["std"]
-std = ["bincode/std", "serde/std", "serde_json/std", "acid_io/std"]
+std = ["bincode/std", "serde/std", "serde_json/std", "acid_io/std", "xts-mode/std", "crossterm", "base64/std"]
 
 [target.'cfg(windows)'.dev-dependencies]
 windows-drives = "0.5"
@@ -42,3 +42,6 @@ windows-drives = "0.5"
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"
 nix = "0.20"
+
+[patch.crates-io]
+xts-mode = { git = "https://github.com/oberien/xts-mode" }

@@ -28,7 +28,7 @@ use alloc::{format, vec};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use self::error::{LuksError, ParseError};
-use aes::{Aes128, Aes256, NewBlockCipher};
+use aes::{Aes128, Aes256, cipher::KeyInit};
 use hmac::Hmac;
 use secrecy::{CloneableSecret, DebugSecret, ExposeSecret, Secret, Zeroize};
 use serde::{
@@ -885,22 +885,15 @@ impl<T: Read + Seek> LuksDevice<T> {
                 memory,
                 cpus,
             } => {
-                let variant = if let LuksKdf::argon2i { .. } = keyslot.kdf() {
-                    argon2::Variant::Argon2i
+                let algorithm = if let LuksKdf::argon2i { .. } = keyslot.kdf() {
+                    argon2::Algorithm::Argon2i
                 } else {
-                    argon2::Variant::Argon2id
+                    argon2::Algorithm::Argon2id
                 };
-                let config = argon2::Config {
-                    variant,
-                    mem_cost: *memory,
-                    time_cost: *time,
-                    lanes: *cpus,
-                    thread_mode: argon2::ThreadMode::Parallel,
-                    hash_length: area.key_size(),
-                    ..argon2::Config::default()
-                };
-                let salt = base64::decode(&salt)?;
-                pw_hash = argon2::hash_raw(password, &salt, &config)?;
+                let params = argon2::Params::new(*memory, *time, *cpus, Some(area.key_size() as usize))?;
+                let argon = argon2::Argon2::new(algorithm, argon2::Version::V0x13, params);
+                let salt = base64::decode(salt)?;
+                argon.hash_password_into(password, &salt, &mut pw_hash)?;
             }
             LuksKdf::pbkdf2 {
                 salt,

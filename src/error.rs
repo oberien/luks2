@@ -59,6 +59,7 @@ pub enum LuksError {
     #[error("Invalid key length: {0}. Valid lengths are 32 for AES-128-XTS or 64 for AES-256-XTS")]
     InvalidKeyLength(usize),
 
+    #[cfg(feature = "std")]
     #[error("Error during password input: {0}")]
     PasswordError(#[from] crossterm::ErrorKind),
 }
