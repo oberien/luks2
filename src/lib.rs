@@ -115,6 +115,10 @@ impl LuksHeader {
 
         Ok(h)
     }
+
+    pub fn uuid(&self) -> &str {
+        core::str::from_utf8(&self.uuid).unwrap().trim_end_matches('\x00')
+    }
 }
 
 // implement manually to omit always-zero padding sections
