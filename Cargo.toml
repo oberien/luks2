@@ -34,7 +34,7 @@ acid_io = { version = "0.1.0", features = ["alloc"] }
 
 [features]
 default = ["std"]
-std = ["bincode/std", "serde/std", "serde_json/std", "acid_io/std", "xts-mode/std", "crossterm", "base64/std"]
+std = ["bincode/std", "serde/std", "serde_json/std", "acid_io/std", "xts-mode/std", "crossterm", "base64/std", "argon2/std"]
 
 [target.'cfg(windows)'.dev-dependencies]
 windows-drives = "0.5"

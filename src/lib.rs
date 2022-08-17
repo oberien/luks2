@@ -766,13 +766,32 @@ pub struct LuksDevice<T: Read + Seek> {
     pub active_segment: LuksSegment,
 }
 
+enum PasswordOrMasterKey<'a> {
+    Password(&'a [u8]),
+    MasterKey(SecretMasterKey),
+}
+
 impl<T: Read + Seek> LuksDevice<T> {
+    pub fn from_device(
+        device: T,
+        password: &[u8],
+        sector_size: usize,
+    ) -> Result<Self, LuksError> {
+        Self::from_device_internal(device, PasswordOrMasterKey::Password(password), sector_size)
+    }
     /// Creates a `LuksDevice` from a device (i. e. any type that implements [`Read`] and [`Seek`]).
     /// WARNING: this struct internally stores the master key in *user-space* RAM. Please consider the
     /// security implications this may have.
-    pub fn from_device(
+    pub fn from_device_with_master_key(
+        device: T,
+        master_key: SecretMasterKey,
+        sector_size: usize,
+    ) -> Result<Self, LuksError> {
+        Self::from_device_internal(device, PasswordOrMasterKey::MasterKey(master_key), sector_size)
+    }
+    fn from_device_internal(
         mut device: T,
-        password: &[u8],
+        password_or_master_key: PasswordOrMasterKey,
         sector_size: usize,
     ) -> Result<Self, LuksError> {
         // read and parse LuksHeader
@@ -786,7 +805,10 @@ impl<T: Read + Seek> LuksDevice<T> {
         let j: Vec<u8> = j.iter().map(|b| *b).filter(|b| *b != 0).collect();
         let json = LuksJson::from_slice(&j)?;
 
-        let master_key = Self::decrypt_master_key(password, &json, &mut device, sector_size)?;
+        let master_key = match password_or_master_key {
+            PasswordOrMasterKey::Password(password) => Self::decrypt_master_key(password, &json, &mut device, sector_size)?,
+            PasswordOrMasterKey::MasterKey(master_key) => master_key,
+        };
         let active_segment = json.segments[&0].clone();
 
         let mut d = LuksDevice {
