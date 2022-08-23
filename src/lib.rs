@@ -663,7 +663,7 @@ impl LuksJson {
         // check that all segments/keyslots references are valid
         let refs_valid = j.digests.iter().all(|(_, d)| {
             d.keyslots().iter().all(|k| j.keyslots.contains_key(k))
-                && d.segments().iter().all(|s| j.keyslots.contains_key(s))
+                && d.segments().iter().all(|s| j.segments.contains_key(s))
         });
         if !refs_valid {
             return Err(ParseError::InvalidReference);
