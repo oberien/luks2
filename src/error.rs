@@ -47,6 +47,9 @@ pub enum LuksError {
     #[error("Unsupported hash function used by anti-forensic splitter: {0}")]
     UnsupportedAfHash(String),
 
+    #[error("Unsupported hash function used by digest: {0}")]
+    UnsupportedDigestHash(String),
+
     #[error("Unsupported key size: {0}")]
     UnsupportedKeySize(u32),
 

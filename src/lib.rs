@@ -36,6 +36,7 @@ use serde::{
     Deserialize, Serialize,
 };
 use sha2::Sha256;
+use sha1::Sha1;
 use core::{
     cmp::max,
     fmt::{Debug, Display},
@@ -886,11 +887,6 @@ impl<T: Read + Seek> LuksDevice<T> {
         let area = keyslot.area();
         let af = keyslot.af();
 
-        // only sha256 is supported
-        if af.hash() != "sha256" {
-            return Err(LuksError::UnsupportedAfHash(af.hash().to_string()));
-        }
-
         // read area of keyslot
         let mut k = vec![0; keyslot.key_size() as usize * af.stripes() as usize];
         device.seek(SeekFrom::Start(area.offset()))?;
@@ -926,9 +922,13 @@ impl<T: Read + Seek> LuksDevice<T> {
                 hash,
                 iterations,
             } => {
-                assert_eq!(hash, "sha256");
+                let hash_fn = match json.digests[&0].hash().as_str() {
+                    "sha256" => pbkdf2::pbkdf2::<Hmac<Sha256>>,
+                    "sha1" => pbkdf2::pbkdf2::<Hmac<Sha1>>,
+                    _ => return Err(LuksError::UnsupportedAfHash(af.hash().clone())),
+                };
                 let salt = base64::decode(salt)?;
-                pbkdf2::pbkdf2::<Hmac<Sha256>>(password, &salt, *iterations, &mut pw_hash);
+                (password, &salt, *iterations, &mut pw_hash);
             }
         }
 
@@ -964,7 +964,12 @@ impl<T: Read + Seek> LuksDevice<T> {
         let digest_actual = base64::decode(json.digests[&0].digest())?;
         let mut digest_computed = vec![0; digest_actual.len()];
         let salt = base64::decode(json.digests[&0].salt())?;
-        pbkdf2::pbkdf2::<Hmac<Sha256>>(
+        let hash_fn = match json.digests[&0].hash().as_str() {
+            "sha256" => pbkdf2::pbkdf2::<Hmac<Sha256>>,
+            "sha1" => pbkdf2::pbkdf2::<Hmac<Sha1>>,
+            _ => return Err(LuksError::UnsupportedDigestHash(json.digests[&0].hash().clone())),
+        };
+        hash_fn(
             &master_key.expose_secret().0,
             &salt,
             json.digests[&0].iterations(),

@@ -13,3 +13,7 @@ available on your platform).
 * add no_std support
 * fix a bug where the final 16MB (segment-offset) of a segment weren't read
 * fix a bug where the last sector wasn't read fully
+* add `LuksHeader::uuid` function
+* allow opening a `LuksDevice` with an existing `SecretMasterKey`
+* fix a bug where decryption fails if keyslot and segmentslot aren't equal
+* add sha1 support
