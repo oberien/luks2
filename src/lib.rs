@@ -922,13 +922,13 @@ impl<T: Read + Seek> LuksDevice<T> {
                 hash,
                 iterations,
             } => {
-                let hash_fn = match json.digests[&0].hash().as_str() {
+                let hash_fn = match hash.as_str() {
                     "sha256" => pbkdf2::pbkdf2::<Hmac<Sha256>>,
                     "sha1" => pbkdf2::pbkdf2::<Hmac<Sha1>>,
                     _ => return Err(LuksError::UnsupportedAfHash(af.hash().clone())),
                 };
                 let salt = base64::decode(salt)?;
-                (password, &salt, *iterations, &mut pw_hash);
+                hash_fn(password, &salt, *iterations, &mut pw_hash);
             }
         }
 
