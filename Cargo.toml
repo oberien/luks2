@@ -18,7 +18,7 @@ path = "./src/lib.rs"
 [dependencies]
 aes = "0.8"
 base64 = { version = "0.13", default-features = false, features = ["alloc"] }
-bincode = { version = "2.0.0-rc.1", default-features = false, features = ["alloc", "derive"] }
+bincode = { version = "2.0.0-rc.3", default-features = false, features = ["alloc", "derive"] }
 crossterm = { version = "0.19", optional = true }
 hmac = "0.12.1"
 pbkdf2 = { version = "0.11.0", default_features = false }

@@ -98,7 +98,7 @@ impl LuksHeader {
     ///
     /// Note: a LUKS2 header is always exactly 4096 bytes long.
     pub fn from_slice(slice: &[u8]) -> Result<Self, ParseError> {
-        let options = bincode::config::legacy().with_big_endian().with_fixed_int_encoding().skip_fixed_array_length();
+        let options = bincode::config::legacy().with_big_endian().with_fixed_int_encoding();
         let h: Self = bincode::decode_from_slice(slice, options)?.0;
         // let h: BorrowCompat<Self> = bincode::decode_from_slice(slice, options)?.0;
         // let h = h.0;
@@ -951,10 +951,8 @@ impl<T: Read + Seek> LuksDevice<T> {
             }
             x => return Err(LuksError::UnsupportedKeySize(x)),
         }
-
         // make k a secret after decryption
         let k = Secret::new(k);
-
         // merge and hash master key
         let master_key = Secret::new(MasterKey(af::merge(
             &k.expose_secret(),
