@@ -62,7 +62,7 @@
 			"iv_tweak": "0",
 			"size": "dynamic",
 			"encryption": "aes-xts-plain64",
-			"sector_size": 51266
+			"sector_size": 4096
 		}
 	},
 	"digests": {

@@ -1,4 +1,5 @@
 # Fork of luks2
+[![GithubCI Status](https://github.com/oberien/luks2/actions/workflows/rust.yml/badge.svg?branch=master)](https://github.com/oberien/luks2/actions/workflows/rust.yml?query=branch%3Amaster)
 
 Original: https://sr.ht/~mvforell/luks2/
 

@@ -1,9 +1,9 @@
 #[test]
 fn parse_json() {
 	use luks2::*;
-	use std::{collections::HashMap, io::Cursor};
+	use std::{collections::BTreeMap};
 
-	let mut k = HashMap::new();
+	let mut k = BTreeMap::new();
 	k.insert(0, LuksKeyslot::luks2 {
 		key_size: 32,
 		area: LuksArea::raw {
@@ -45,21 +45,21 @@ fn parse_json() {
 		priority: None
 	});
 
-	let mut t = HashMap::new();
+	let mut t = BTreeMap::new();
 	t.insert(0, LuksToken {});
 
-	let mut s = HashMap::new();
+	let mut s = BTreeMap::new();
 	s.insert(0, LuksSegment::crypt {
 		offset: 4194304,
 		size: LuksSegmentSize::dynamic,
 		iv_tweak: 0,
 		encryption: String::from("aes-xts-plain64"),
-		sector_size: 51266,
+		sector_size: 4096,
 		integrity: None,
 		flags: None
 	});
 
-	let mut d = HashMap::new();
+	let mut d = BTreeMap::new();
 	d.insert(0, LuksDigest::pbkdf2 {
 		keyslots: vec![0, 1],
 		segments: vec![0],
